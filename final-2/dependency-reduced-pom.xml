@@ -13,7 +13,7 @@
       <plugin>
         <groupId>net.alchim31.maven</groupId>
         <artifactId>scala-maven-plugin</artifactId>
-        <version>4.8.1</version>
+        <version>4.9.2</version>
         <executions>
           <execution>
             <goals>
@@ -48,7 +48,7 @@
               </filters>
               <transformers>
                 <transformer>
-                  <mainClass>com.example.WordCount</mainClass>
+                  <mainClass>com.example.TextClassification</mainClass>
                 </transformer>
               </transformers>
             </configuration>
@@ -140,7 +140,7 @@
     </dependency>
   </dependencies>
   <properties>
-    <scala.version>2.12.10</scala.version>
+    <scala.version>2.12.19</scala.version>
     <encoding>UTF-8</encoding>
     <maven.compiler.source>1.8</maven.compiler.source>
     <spark.version>3.0.0</spark.version>
