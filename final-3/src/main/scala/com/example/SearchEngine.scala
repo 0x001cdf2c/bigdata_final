@@ -3,6 +3,7 @@ package com.example
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.rdd.RDD
 import java.io.PrintWriter
+import org.apache.hadoop.fs.{FileSystem, Path}
 
 /**
  * 基于 Spark RDD 的倒排索引构建与关键词搜索引擎
@@ -27,9 +28,9 @@ object SearchEngine {
     val pagesPath     = args(0)
     val predCatPath   = args(1)
     val queriesPath   = args(2)
-    // 去掉可能的 file:// 或 file: 前缀，PrintWriter 需要纯本地路径 用于本地测试
-    val invIdxOutPath = args(3).replaceFirst("^file:/*", "/")
-    val topKOutPath   = args(4).replaceFirst("^file:/*", "/")
+    // 输出路径，支持 HDFS 路径或本地路径
+    val invIdxOutPath = args(3)
+    val topKOutPath   = args(4)
     val K             = args(5).toInt
 
     val spark = SparkSession.builder
@@ -141,11 +142,14 @@ object SearchEngine {
       .map { case (term, postings) => s"$term\t$postings" }
       .collect()
 
-    val pw1 = new PrintWriter(invIdxOutPath)
+    val hadoopConf = sc.hadoopConfiguration
+    val fs1 = FileSystem.get(new Path(invIdxOutPath).toUri, hadoopConf)
+    val pw1 = new PrintWriter(fs1.create(new Path(invIdxOutPath)))
     try {
       invIdxLines.foreach(pw1.println)
     } finally {
       pw1.close()
+      fs1.close()
     }
 
     
@@ -185,20 +189,24 @@ object SearchEngine {
         if (queryTerms.isEmpty) {
           Seq.empty
         } else {
-          // docId → 累计 tfidf
+          // docId → 累计 tfidf 的map
           val docScores = scala.collection.mutable.Map[String, Double]()
-          // docId → category
+          // docId → category 的map，后续计算 category_score 时需要用到
           val docCatMap = scala.collection.mutable.Map[String, String]()
 
+          //对于单个queries里面的每一个词，计算每一个doc的tfidf得分，并累加到docScores中，同时记录doc的类别信息到docCatMap中
           for (term <- queryTerms) {
+            // 注意这里的foreach不是遍历的意思，而是检查是不是有值，没有就不继续了，有就继续处理这个term对应的posting list
             invIdxBc.value.get(term).foreach { postings =>
               for ((docId, tfidfVal, cat) <- postings) {
+                // 对于每一个包含查询词的文档，累加它的 tfidf 得分，并记录它的类别
                 docScores(docId) = docScores.getOrElse(docId, 0.0) + tfidfVal
                 docCatMap(docId) = cat
               }
             }
           }
 
+          // 现在得到了每一个query中单个单词对每一个文档的tiidf得分，以及每一个文档的类别信息
           if (docScores.isEmpty) {
             Seq.empty
           } else {
@@ -209,8 +217,8 @@ object SearchEngine {
               (docId, tfidfSum, catScore, retScore)
             }.toSeq
               .sortBy(-_._4)        // 按 retrieval_score 降序
-              .take(K)
-              .zipWithIndex
+              .take(K)              // 取 TopK
+              .zipWithIndex         // 添加排名信息
               .map { case ((docId, tfidfSum, catScore, retScore), idx) =>
                 (queryId,
                  docId,
@@ -223,18 +231,20 @@ object SearchEngine {
         }
     }
 
-    // 保存结果（单个文件）
+    // 保存结果（通过 HDFS API 写出单文件）
     val topKHeader = "query_id\tdoc_id\ttfidf_score\tcategory_score\tretrieval_score\trank"
     val topKLines: Array[String] = topKHeader +: results.collect().map {
       case (qid, did, tf, cs, rs, rk) =>
         s"$qid\t$did\t$tf\t$cs\t$rs\t$rk"
     }
 
-    val pw2 = new PrintWriter(topKOutPath)
+    val fs2 = FileSystem.get(new Path(topKOutPath).toUri, hadoopConf)
+    val pw2 = new PrintWriter(fs2.create(new Path(topKOutPath)))
     try {
       topKLines.foreach(pw2.println)
     } finally {
       pw2.close()
+      fs2.close()
     }
 
     allDocs.unpersist()
