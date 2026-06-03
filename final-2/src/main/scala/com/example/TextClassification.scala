@@ -3,6 +3,7 @@ package com.example
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.rdd.RDD
 import java.io.PrintWriter
+import org.apache.hadoop.fs.{FileSystem, Path}
 
 object TextClassification {
 
@@ -15,9 +16,9 @@ object TextClassification {
     val pagesPath    = args(0)
     val trainIdsPath = args(1)
     val testIdsPath  = args(2)
-    // 去掉可能的 file:// 或 file: 前缀，PrintWriter 需要纯本地路径
-    val predOutPath  = args(3).replaceFirst("^file:/*", "/")
-    val reportOutPath = args(4).replaceFirst("^file:/*", "/")
+    // 输出路径，支持 HDFS 路径 (如 /user/xxx/out.tsv) 或本地路径 (如 file:///home/xxx/out.tsv)
+    val predOutPath   = args(3)
+    val reportOutPath = args(4)
 
     val spark = SparkSession.builder
       .appName("MultinomialNaiveBayes-TextClassification")
@@ -140,7 +141,7 @@ object TextClassification {
       .collectAsMap()
       .toMap
 
-    // 广播这些映射表
+    // 广播这些映射表 已经得到了 count(w, c) 和 total_words(c)，接下来将它们广播到各个 worker 节点，供后续计算使用
     val wordCountBc   = sc.broadcast(wordCountPerClass)
     val totalWordsBc  = sc.broadcast(totalWordsPerClass)
     val vocabSizeBc   = sc.broadcast(vocabSize)
@@ -177,20 +178,23 @@ object TextClassification {
     }
 
     
-    // 输出文件 1: pred_category.tsv（单个文件）
+    // 输出文件 1: pred_category.tsv（通过 HDFS API 写出单文件）
     val predHeader = "doc_id\tpred_category"
     val predLines: Array[String] = predHeader +: predictions.collect().map {
       case (id, cat) => s"$id\t$cat"
     }
-    val pw1 = new PrintWriter(predOutPath)
+    val hadoopConf = sc.hadoopConfiguration
+    val fs1 = FileSystem.get(new Path(predOutPath).toUri, hadoopConf)
+    val pw1 = new PrintWriter(fs1.create(new Path(predOutPath)))
     try {
       predLines.foreach(pw1.println)
     } finally {
       pw1.close()
+      fs1.close()
     }
 
    
-    // 输出文件 2: classification_report.txt（单个文件）
+    // 输出文件 2: classification_report.txt（通过 HDFS API 写出单文件）
     val testDocCount: Long = testDocs.count()
     val predCategoryCounts: Map[String, Long] = predictions
       .map(_._2)
@@ -216,11 +220,13 @@ object TextClassification {
       "=" * 50
     )
 
-    val pw2 = new PrintWriter(reportOutPath)
+    val fs2 = FileSystem.get(new Path(reportOutPath).toUri, hadoopConf)
+    val pw2 = new PrintWriter(fs2.create(new Path(reportOutPath)))
     try {
       reportLines.foreach(pw2.println)
     } finally {
       pw2.close()
+      fs2.close()
     }
 
     trainDocs.unpersist()
