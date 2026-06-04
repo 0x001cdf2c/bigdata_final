@@ -60,7 +60,6 @@ spark-submit \
 ```
 任务4命令：
 在课程平台运行：
-
 spark-submit
 --class com.njuse.exp2.Task4PageRank
 --master yarn
@@ -69,6 +68,7 @@ exp2-task14.jar
 /user/<用户名>/final_exp/exp2/output/task1/clean_links.tsv
 /user/<用户名>/final_exp/exp2/output/task3/retrieval_topk.tsv
 /user/<用户名>/final_exp/exp2/output/task4
+
 本地运行：
 spark-submit
 --class com.njuse.exp2.Task4PageRank
