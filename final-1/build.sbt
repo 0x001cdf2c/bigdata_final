@@ -10,7 +10,8 @@ ThisBuild / scalaVersion := "2.12.10"
 
 lazy val root = (project in file("."))
   .settings(
-    name := "exp2-task1-scala",
+    name := "exp2-task14",
+    artifactName := { (_, _, artifact) => artifact.name + "." + artifact.extension },
 
     // 编译目标 1.8
     javacOptions ++= Seq("-source", "1.8", "-target", "1.8"),
