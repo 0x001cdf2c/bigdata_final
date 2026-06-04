@@ -10,7 +10,7 @@
 spark-submit
 --class com.njuse.exp2.Task1Cleaning
 --master yarn
-exp2-task1-scala_2.12-1.0.0.jar
+exp2-task14.jar
 /user/root/final_exp/exp2/raw_pages.tsv
 /user/root/final_exp/exp2/raw_links.tsv
 /user/root/final_exp/exp2/stopwords.txt
@@ -20,7 +20,7 @@ exp2-task1-scala_2.12-1.0.0.jar
 spark-submit
 --class com.njuse.exp2.Task1Cleaning
 --master local[*]
-exp2-task1-scala_2.12-1.0.0.jar
+exp2-task14.jar
 ./sample/raw_pages.tsv
 ./sample/raw_links.tsv
 ./sample/stopwords.txt
@@ -59,7 +59,26 @@ spark-submit \
 
 ```
 任务4命令：
+在课程平台运行：
 
+spark-submit
+--class com.njuse.exp2.Task4PageRank
+--master yarn
+exp2-task14.jar
+/user/<用户名>/final_exp/exp2/output/task1/clean_pages.tsv
+/user/<用户名>/final_exp/exp2/output/task1/clean_links.tsv
+/user/<用户名>/final_exp/exp2/output/task3/retrieval_topk.tsv
+/user/<用户名>/final_exp/exp2/output/task4
+本地运行：
+spark-submit
+--class com.njuse.exp2.Task4PageRank
+--master local[*]
+exp2-task14.jar
+./clean_pages.tsv
+./clean_links.tsv
+./retrieval_topk.tsv
+./out_task4
+--local
 ```
 
 ```
