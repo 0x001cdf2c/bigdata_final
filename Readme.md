@@ -6,7 +6,26 @@
 
 ```
 任务1命令：
+在课程平台运行：
+spark-submit
+--class com.njuse.exp2.Task1Cleaning
+--master yarn
+exp2-task1-scala_2.12-1.0.0.jar
+/user/root/final_exp/exp2/raw_pages.tsv
+/user/root/final_exp/exp2/raw_links.tsv
+/user/root/final_exp/exp2/stopwords.txt
+/user/<用户名>/final_exp/exp2/output/task1
 
+本地运行：
+spark-submit
+--class com.njuse.exp2.Task1Cleaning
+--master local[*]
+exp2-task1-scala_2.12-1.0.0.jar
+./sample/raw_pages.tsv
+./sample/raw_links.tsv
+./sample/stopwords.txt
+./output/task1
+--local
 ```
 
 ```
