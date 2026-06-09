@@ -41,6 +41,9 @@ $SPARK_HOME/bin/spark-submit \
     pred_category.tsv classification_report.txt \
     cnb
 这里最后输入cnb使用优化的贝叶斯，否则使用朴素贝叶斯
+
+平台执行：
+spark-submit clean_pages.tsv train_ids.txt test_ids.txt pred_category.tsv classification_report_.txt cnb
 ```
 
 ```
@@ -57,6 +60,9 @@ spark-submit \
     file:///home/kali/bigdata_final/final-3/inverted_index.tsv \
     file:///home/kali/bigdata_final/final-3/retrieval_topk.tsv \
     5
+
+平台执行：
+spark-submit project3.jar clean_pages.tsv pred_category.tsv queries.tsv inverted_index.tsv /user/retrieval_topk.tsv 20
 ```
 
 ```
