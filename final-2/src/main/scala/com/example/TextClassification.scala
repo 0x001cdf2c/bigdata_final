@@ -8,9 +8,9 @@ import org.apache.hadoop.fs.{FileSystem, Path}
 object TextClassification {
 
   def main(args: Array[String]): Unit = {
-    // 参数: <pages> <train_ids> <test_ids> <pred_out> <report_out>
+    // 参数: <pages> <train_ids> <test_ids> <pred_out> <report_out> [algo]
     if (args.length < 5) {
-      System.err.println("用法: spark-submit ... <clean_pages.tsv> <train_ids.txt> <test_ids.txt> <pred_output> <report_output>")
+      System.err.println("用法: spark-submit ... <clean_pages.tsv> <train_ids.txt> <test_ids.txt> <pred_output> <report_output> [mnb|cnb]")
       System.exit(1)
     }
     val pagesPath    = args(0)
@@ -19,9 +19,15 @@ object TextClassification {
     // 输出路径，支持 HDFS 路径 (如 /user/xxx/out.tsv) 或本地路径 (如 file:///home/xxx/out.tsv)
     val predOutPath   = args(3)
     val reportOutPath = args(4)
+    // 算法选择: mnb = Multinomial Naive Bayes, cnb = Complement Naive Bayes
+    val algo = if (args.length >= 6) args(5).toLowerCase else "mnb"
+    val algoName = algo match {
+      case "cnb" => "Complement Naive Bayes"
+      case _     => "Multinomial Naive Bayes"
+    }
 
     val spark = SparkSession.builder
-      .appName("MultinomialNaiveBayes-TextClassification")
+      .appName(s"$algoName-TextClassification")
       .getOrCreate()
 
     val sc = spark.sparkContext
@@ -146,33 +152,71 @@ object TextClassification {
     val totalWordsBc  = sc.broadcast(totalWordsPerClass)
     val vocabSizeBc   = sc.broadcast(vocabSize)
 
+    // ---- Complement NB 额外统计 ----
+    // 每个词在所有类别中的总出现次数: total_count(w) = Σ_c count(w, c)
+    val wordTotalCount: Map[String, Long] = wordCountPerClass
+      .groupBy(_._1._2)           // 按词分组 (忽略类别)
+      .map { case (w, m) => (w, m.values.sum) }
+    // 所有类别的总词数: total_words_all = Σ_c total_words(c)
+    val totalWordsAll: Long = totalWordsPerClass.values.sum
+
+    val wordTotalCountBc = sc.broadcast(wordTotalCount)
+    val totalWordsAllBc  = sc.broadcast(totalWordsAll)
+
     /*
       对测试集文档进行分类预测
+      ── Multinomial NB ──
       score(c, d) = log P(c) + Σ log P(w|c)
-      P(w|c) = (count(w,c) + 1) / (total_words(c) + |V|) 加 V 是因为使用了 Laplace 平滑，避免概率为0的情况
-      也就是：
-      1. 对每个测试文档，分词得到词列表
-      2. 对每个类别，计算 score(c, d)，也就是 log P(c) + Σ log P(w|c) 这个类别的概率*当前类别下每一个词的概率
-      3. 选择 score 最高的类别作为预测结果
+      P(w|c) = (count(w,c) + 1) / (total_words(c) + |V|)
+
+      ── Complement NB ──
+      score(c, d) = log P(c) - Σ log P(w|¬c)
+      P(w|¬c) = (count(w,¬c) + 1) / (total_words(¬c) + |V|)
+      count(w,¬c) = total_count(w) - count(w,c)
+      total_words(¬c) = total_words_all - total_words(c)
+      用减号是因为 P(w|¬c) 越大说明该词越不特有于类别 c，应惩罚
     */
     val predictions: RDD[(String, String)] = testDocs.map {
       case (docId, title, content, _) =>
         val words = tokenize(title + " " + content)
 
-        // 对每个类别计算得分，选最高者
-        val (predLabel, _) = categoriesBc.value.map { c =>
-          val prior = logPriorBc.value(c)
+        val (predLabel, _) = algo match {
+          // ==================== Multinomial NB ====================
+          case "mnb" =>
+            categoriesBc.value.map { c =>
+              val prior = logPriorBc.value(c)
+              val likelihood: Double = words.map { w =>
+                val cnt   = wordCountBc.value.getOrElse((c, w), 0L)
+                val total = totalWordsBc.value.getOrElse(c, 0L)
+                Math.log((cnt + 1.0) / (total + vocabSizeBc.value))
+              }.sum
+              (c, prior + likelihood)
+            }.maxBy(_._2)
 
-          // Σ log P(w|c)
-          val likelihood: Double = words.map { w =>
-            val cnt   = wordCountBc.value.getOrElse((c, w), 0L)
-            val total = totalWordsBc.value.getOrElse(c, 0L)
-            // Laplace 平滑: P(w|c) = (count(w,c) + 1) / (total_words(c) + |V|)
-            Math.log((cnt + 1.0) / (total + vocabSizeBc.value))
-          }.sum
+          // ==================== Complement NB ====================
+          case "cnb" =>
+            categoriesBc.value.map { c =>
+              val prior = logPriorBc.value(c)
+              val totalC = totalWordsBc.value.getOrElse(c, 0L)
+              // total_words(¬c) = 所有类别总词数 - 类别c的总词数
+              val totalNotC = totalWordsAllBc.value - totalC
 
-          (c, prior + likelihood)
-        }.maxBy(_._2) // 取 score 最高的类别
+              // Σ log P(w|¬c)  —— 补集似然度（惩罚项）
+              val complementLikelihood: Double = words.map { w =>
+                val cntWC    = wordCountBc.value.getOrElse((c, w), 0L)
+                val cntTotal = wordTotalCountBc.value.getOrElse(w, 0L)
+                // count(w, ¬c) = 词w在所有类别中的总次数 - 词w在类别c中的次数
+                val cntNotC  = cntTotal - cntWC
+                Math.log((cntNotC + 1.0) / (totalNotC + vocabSizeBc.value))
+              }.sum
+
+              // score = prior - complementLikelihood（减号：词在补集中越常见，惩罚越大）
+              (c, prior - complementLikelihood)
+            }.maxBy(_._2)
+
+          case _ =>
+            throw new IllegalArgumentException(s"未知算法: $algo，可选: mnb | cnb")
+        }
 
         (docId, predLabel)
     }
@@ -204,7 +248,7 @@ object TextClassification {
 
     val reportLines: Seq[String] = Seq(
       "=" * 50,
-      "   Multinomial Naive Bayes 文本分类报告",
+      s"   $algoName 文本分类报告",
       "=" * 50,
       "",
       s"1. 训练文档数: $trainDocCount",

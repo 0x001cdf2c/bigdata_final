@@ -19,7 +19,9 @@ $SPARK_HOME/bin/spark-submit \
     file:///home/kali/bigdata_final/final-2/clean_pages.tsv \
     file:///home/kali/bigdata_final/final-2/train_ids.txt \
     file:///home/kali/bigdata_final/final-2/test_ids.txt \
-    pred_category.tsv classification_report.txt
+    pred_category.tsv classification_report.txt \
+    cnb
+这里最后输入cnb使用优化的贝叶斯，否则使用朴素贝叶斯
 ```
 
 ```
